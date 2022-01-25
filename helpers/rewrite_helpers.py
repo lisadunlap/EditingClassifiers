@@ -180,7 +180,7 @@ def edit_classifier(args, train_data,
         
         with torch.enable_grad():
             for i in pbar:
-                loss = compute_loss(context_model(imgs.cuda()), tgts.cuda())
+                loss = compute_loss(context_model(imgs.cuda()), tgts.long().cuda())
                 optimizer.zero_grad()
                 loss.backward()
                 pbar.set_description(str(loss))

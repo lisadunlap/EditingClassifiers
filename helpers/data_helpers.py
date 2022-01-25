@@ -10,6 +10,14 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from collections import Counter
 from tools.custom_folder import ImageFolder
+from omegaconf import OmegaConf
+
+from helpers.waterbirds import Waterbirds, WaterbirdsBoring, WaterbirdsSimple
+
+# overrides = OmegaConf.from_cli(flags.overrides)
+cfg       = OmegaConf.load('configs/waterbirds.yaml')
+base_cfg  = OmegaConf.load('configs/base.yaml')
+args      = OmegaConf.merge(base_cfg, cfg)
 
 def tile_image(img):
     tiled = Image.new('RGB', (800,800), "black")
@@ -22,8 +30,26 @@ def tile_image(img):
 
 def get_dataset(dataset_name, dataset_path, 
                 batch_size=32, workers=8):
-    assert dataset_name in ['ImageNet', 'Places365']
-    if dataset_name == 'ImageNet':
+    assert dataset_name in ['ImageNet', 'Places365', 'Waterbirds', 'WaterbirdsSimple']
+    if dataset_name == 'Waterbirds':
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    elif dataset_name == 'WaterbirdsSimple':
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    elif dataset_name == 'ImageNet':
         dataset = datasets.ImageNet(dataset_path)
     else:
         dataset = datasets.Places365(dataset_path)
@@ -51,7 +77,7 @@ def get_vehicles_on_snow_data(dataset_name, class_dict, dataset_path='./data/'):
     TRAIN_PATH = f'{dataset_path}/snow/train/road:15:05:2021_17:39:17.pt'
     train_data = ch.load(TRAIN_PATH)
     train_imgs, train_masks, train_labels = train_data['imgs'], train_data['masks'], train_data['labels']
-    
+    print(train_masks.shape)
     pattern_img_path = f'{dataset_path}/snow/train/snow_texture.jpg'
     pattern_img = transform(Image.open(pattern_img_path))[:3, :, :]
     modified_imgs = train_imgs * (1-train_masks) + pattern_img.unsqueeze(0) * train_masks
@@ -64,6 +90,75 @@ def get_vehicles_on_snow_data(dataset_name, class_dict, dataset_path='./data/'):
 
     TEST_PATH = f'{dataset_path}/snow/test'
     test_data = get_scraped_data(TEST_PATH, dataset_name, class_dict, transform)
+    TEST_EXT_PATH = f'{dataset_path}/snow/test_ext'
+    test_ext_data = get_scraped_data(TEST_EXT_PATH, dataset_name, class_dict, transform)
+    
+    return train_data, test_data, test_ext_data
+
+def get_waterbirds_data(dataset_path='./data/', pattern_img_path = './data/waterbirds/forest_broadleaf.jpg'):
+
+    transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+        ])
+    
+    TRAIN_PATH = f'{dataset_path}/waterbirds/data.pt'
+    train_data = ch.load(TRAIN_PATH)
+    train_imgs, train_masks, train_labels = train_data['imgs'], train_data['masks'], train_data['labels']
+    train_masks_new = []
+    for mask in train_masks:
+        train_masks_new.append(ch.stack([mask[0], mask[0], mask[0]]))
+    print(ch.stack(train_masks_new).shape)
+    # pattern_img_path = f'{dataset_path}/waterbirds/forest_broadleaf.jpg'
+    pattern_img = transform(Image.open(pattern_img_path))[:3, :, :]
+    modified_imgs = train_imgs * (1-train_masks) + pattern_img.unsqueeze(0) * train_masks
+    
+    train_data = {'imgs': train_imgs,
+                 'modified_imgs': modified_imgs,
+                 'masks': train_masks,
+                 'labels': train_labels
+                 }
+
+    test = ch.load('./data/waterbirds/data_test_normalized.pt')
+    test_data = {0: ch.stack(test[0]), 1: ch.stack(test[1])}
+    
+    return train_data, test_data
+
+def get_waterbirds_simple_data(dataset_path='./data/', pattern_img_path = './data/waterbirds/forest.jpg', nimgs=10):
+    transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+    mod_imgs, imgs, masks, labels = [], [], [], []
+    for i, d in enumerate(dataset):
+        if i > nimgs:
+            break
+        pattern_img = transform(Image.open(pattern_img_path))[:3, :, :]
+        modified_imgs = d['img'] * (1-d['mask']) + pattern_img * d['mask']
+        imgs.append(d['img'])
+        masks.append(d['mask'])
+        labels.append(d['label'])
+        mod_imgs.append(modified_imgs)
+    train_data = {
+        'imgs': ch.stack(imgs),
+        'modified_imgs': ch.stack(mod_imgs),
+        'masks': ch.stack(masks),
+        'labels': ch.stack(labels)
+    }
+    test_dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+    test = ch.load('./data/waterbirds/data_test_normalized.pt')
+    test_data = {
+        0:[],
+        1:[]
+    }
+    for d in test_dataset:
+        test_data[int(d['label'])].append(d['img'])
+
+    test_data[0] = ch.stack(test_data[0])
+    test_data[1] = ch.stack(test_data[1])
     
     return train_data, test_data
 

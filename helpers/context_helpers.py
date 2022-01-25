@@ -17,6 +17,10 @@ def get_context_model(model, layernum, arch):
     def hook_feature(module, input, output):
         features['pre'] = input[0]
         features['post'] = output
+
+    def hook_feature_vit(module, input, output):
+        features['pre'] = input[0]
+        features['post'] = output[0]
         
     if arch.startswith('vgg'):
         model[layernum + 1].register_forward_hook(hook_feature)
@@ -30,6 +34,9 @@ def get_context_model(model, layernum, arch):
     elif arch == 'resnet18':
         model[layernum + 1].final.register_forward_hook(hook_feature)
         Nfeatures = model[layernum + 1].final.conv2.module.in_channels
+    elif arch == 'ViT':
+        model.transformer.encoder.layer[layernum+1].register_forward_hook(hook_feature_vit)
+        Nfeatures = model.transformer.encoder.layer[layernum+1]
 
     context_model = model
 

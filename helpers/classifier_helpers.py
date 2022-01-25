@@ -3,7 +3,7 @@ sys.path.append('./CLIP')
 import torch as ch
 import torch.nn as nn
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
-from PIL.Image import BICUBIC
+from PIL.Image import BICUBIC, new
 from collections import OrderedDict
 from robustness.model_utils import make_and_restore_model
 from robustness.tools.label_maps import CLASS_DICT
@@ -18,7 +18,7 @@ IMAGENET_PATH = '/path/to/imagenet'
 
 def get_default_paths(dataset_name, arch='vgg16'):
     if dataset_name == 'ImageNet':
-        data_path = IMAGENET_PATH
+        data_path = '/shared/group/ilsvrc'
         label_map = CLASS_DICT['ImageNet']
         
         if arch.startswith('clip'):
@@ -31,6 +31,22 @@ def get_default_paths(dataset_name, arch='vgg16'):
         else:
             model_path = './checkpoints/imagenet_vgg.pt.best'
             model_class, arch = vgg16_bn(), 'vgg16_bn'
+    elif dataset_name == 'Waterbirds':
+        data_path = '/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2'
+        label_map = {0: 'landbird', 1: 'waterbird'}
+        if arch == 'resnet50':
+            model_path = './checkpoints/waterbirds.pth'
+            model_class, arch = resnet50(num_classes=1000), 'resnet50'
+            model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
+            model_class.layer17.fc = nn.Linear(2048, 2)
+    elif dataset_name == 'WaterbirdsSimple':
+        data_path = '/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2'
+        label_map = {0: 'landbird', 1: 'waterbird'}
+        if arch == 'resnet50':
+            model_path = './checkpoint/WaterbirdsSimple.pth'
+            model_class, arch = resnet50(num_classes=1000), 'resnet50'
+            model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
+            model_class.layer17.fc = nn.Linear(2048, 2)
     else:
         NotImplementedError("Dataset not implemented")
  
@@ -76,6 +92,7 @@ def load_checkpoint(model, dataset, resume_path,
     
     if arch.startswith('clip'):
         return load_clip(arch)
+
     
     checkpoint = ch.load(resume_path, pickle_module=dill)
     if isinstance(model, str):
@@ -83,8 +100,30 @@ def load_checkpoint(model, dataset, resume_path,
         model.eval()
         pass
     
-        
-    if 'model' in checkpoint:
+    if 'Waterbirds' in dataset:
+        state_dict= checkpoint['net']
+        new_dict = {}
+        for k in state_dict:
+            if 'module.' in k[:7]:
+                new_dict[k[7:]] = state_dict[k]
+            else:
+                new_dict[k] = state_dict[k]
+        state_dict = new_dict
+        model.load_state_dict(state_dict)
+        return model
+    
+    if 'model_state_dict' in checkpoint:
+        state_dict= checkpoint['model_state_dict']
+        new_dict = {}
+        for k in state_dict:
+            if 'module' in k:
+                components = k.replace('module.', '').split('.')
+                new_thing = components[:-1] + ['module'] + [components[-1]]
+                new_dict['.'.join(new_thing)] = state_dict[k]
+            else:
+                new_dict[k] = state_dict[k]
+        state_dict = new_dict
+    elif 'model' in checkpoint:
         state_dict = checkpoint['model']
     elif 'state_dict' in checkpoint:
         state_dict= checkpoint['state_dict']
