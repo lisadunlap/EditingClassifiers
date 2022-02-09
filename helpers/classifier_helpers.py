@@ -3,6 +3,7 @@ sys.path.append('./CLIP')
 import torch as ch
 import torch.nn as nn
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+import numpy as np
 from PIL.Image import BICUBIC, new
 from collections import OrderedDict
 from robustness.model_utils import make_and_restore_model
@@ -13,10 +14,12 @@ from models.custom_vgg import vgg16_bn, vgg16
 from models.custom_resnet import resnet18, resnet50
 from models.custom_clip import build_model
 from tools.places365_names import class_dict
+from models.vit import VisionTransformer, CONFIGS
 
 IMAGENET_PATH = '/path/to/imagenet'
 
-def get_default_paths(dataset_name, arch='vgg16'):
+def get_default_paths(dataset_name, arch='vgg16', binary=False):
+    num_classes = 1 if binary else 2
     if dataset_name == 'ImageNet':
         data_path = '/shared/group/ilsvrc'
         label_map = CLASS_DICT['ImageNet']
@@ -28,9 +31,14 @@ def get_default_paths(dataset_name, arch='vgg16'):
         elif arch == 'resnet50':
             model_path = './checkpoints/imagenet_resnet50.ckpt'
             model_class, arch = resnet50(), 'resnet50'
-        else:
+        elif arch == 'vgg16':
             model_path = './checkpoints/imagenet_vgg.pt.best'
             model_class, arch = vgg16_bn(), 'vgg16_bn'
+        elif arch == 'ViT':
+            model_path = "./attention_data/ViT-B_16-224.npz"
+            config = CONFIGS["ViT-B_16"]
+            model_class, arch = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True), 'ViT'
+            model_class.load_from(np.load("./attention_data/ViT-B_16-224.npz"))
     elif dataset_name == 'Waterbirds':
         data_path = '/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2'
         label_map = {0: 'landbird', 1: 'waterbird'}
@@ -38,15 +46,43 @@ def get_default_paths(dataset_name, arch='vgg16'):
             model_path = './checkpoints/waterbirds.pth'
             model_class, arch = resnet50(num_classes=1000), 'resnet50'
             model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
-            model_class.layer17.fc = nn.Linear(2048, 2)
+            model_class.layer17.fc = nn.Linear(2048, num_classes)
+        elif arch == 'ViT':
+            model_path = "./checkpoints/WaterbirdsSimple-vit.pth"
+            config = CONFIGS["ViT-B_16"]
+            model_class, arch = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True), 'ViT'
+            model_class.load_from(np.load("./attention_data/ViT-B_16-224.npz"))
+            model_class.head = nn.Linear(768, num_classes)
     elif dataset_name == 'WaterbirdsSimple':
         data_path = '/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2'
         label_map = {0: 'landbird', 1: 'waterbird'}
         if arch == 'resnet50':
-            model_path = './checkpoint/WaterbirdsSimple.pth'
+            model_path = './checkpoints/WaterbirdsSimple.pth'
             model_class, arch = resnet50(num_classes=1000), 'resnet50'
             model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
-            model_class.layer17.fc = nn.Linear(2048, 2)
+            model_class.layer17.fc = nn.Linear(2048, num_classes)
+        elif arch == 'ViT':
+            model_path = "./checkpoints/WaterbirdsSimple-vit.pth"
+            config = CONFIGS["ViT-B_16"]
+            model_class, arch = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True), 'ViT'
+            model_class.load_from(np.load("attention_data/ViT-B_16-224.npz"))
+            model_class.head = nn.Linear(768, num_classes)
+    elif dataset_name == 'Planes':
+        data_path = '/shared/lisabdunlap/vl-attention/data/planes'
+        label_map = {0: 'Airbus', 1: 'Boeing'}
+        if arch == 'resnet50':
+            model_path = './checkpoints/planes-binary.pth'
+            model_class, arch = resnet50(num_classes=1000), 'resnet50'
+            model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
+            model_class.layer17.fc = nn.Linear(2048, num_classes)
+    elif dataset_name == 'PlanesBalanced':
+        data_path = '/shared/lisabdunlap/vl-attention/data/planes'
+        label_map = {0: 'Airbus', 1: 'Boeing'}
+        if arch == 'resnet50':
+            model_path = './checkpoint/planes-balanced.pth'
+            model_class, arch = resnet50(num_classes=1000), 'resnet50'
+            model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
+            model_class.layer17.fc = nn.Linear(2048, num_classes)
     else:
         NotImplementedError("Dataset not implemented")
  
@@ -89,6 +125,7 @@ def load_clip(arch='clip_RN50'):
 
 def load_checkpoint(model, dataset, resume_path, 
                     new_code=True, arch='resnet50'):
+    print(f"....loading checkpoint from {resume_path}")
     
     if arch.startswith('clip'):
         return load_clip(arch)
@@ -100,7 +137,8 @@ def load_checkpoint(model, dataset, resume_path,
         model.eval()
         pass
     
-    if 'Waterbirds' in dataset:
+    # if 'Waterbirds' in dataset or 'Planes' in dataset:
+    if 'net' in checkpoint.keys():
         state_dict= checkpoint['net']
         new_dict = {}
         for k in state_dict:
@@ -110,6 +148,7 @@ def load_checkpoint(model, dataset, resume_path,
                 new_dict[k] = state_dict[k]
         state_dict = new_dict
         model.load_state_dict(state_dict)
+        model.eval()
         return model
     
     if 'model_state_dict' in checkpoint:
@@ -243,6 +282,8 @@ def load_classifier(model_path, model_class, arch, dataset, layernum):
                             arch=arch)
     if arch.startswith('clip'):
         mod, preprocess = mod
+    elif arch == 'ViT':
+        return mod.cuda()
     mod = mod.cuda()
     
     con_mod, Nfeatures = coh.get_context_model(mod, layernum, arch)

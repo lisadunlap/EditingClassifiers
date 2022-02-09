@@ -8,6 +8,7 @@ from tqdm import tqdm
 import numpy as np
 import helpers.context_helpers as coh
 from tools import renormalize, nethook
+import wandb
 
 
 def downscale_mask(mask, tgt_size, threshold=None):
@@ -150,41 +151,102 @@ def edit_classifier(args, train_data,
         elif args.arch.startswith('vgg'):
             first_layer = f'layer{args.layernum}.conv'
         else:
-            first_layer = f'visual.layer{args.layernum + 1}.final'  
-                    
-                
-        if args.mode_rewrite == 'finetune_local':
-            edit_params = [target_weights(target_model)]
-        else:
-            edit_model = nethook.subsequence(context_model, 
-                                             first_layer=first_layer,
-                                             share_weights=True)
-            
-            edit_params = edit_model.parameters()
-            
-            if args.arch.startswith('clip'):
-                edit_params = []
-                for name, param in edit_model.named_parameters():
-                    if 'visual' in name:
-                        edit_params.append(param)
+            first_layer = f'visual.layer{args.layernum + 1}.final'
 
-        optimizer = ch.optim.SGD(edit_params, lr=args.lr)
-        compute_loss = torch.nn.CrossEntropyLoss()
-        pbar = tqdm(range(args.nsteps))
-        
-        imgs = train_data['modified_imgs'][:args.ntrain].float()
-        target_label = np.unique(train_data['labels'][:args.ntrain].numpy())
-        assert len(target_label) == 1
-        
-        tgts = ch.tensor([target_label[0]] * len(imgs))
-        
-        with torch.enable_grad():
-            for i in pbar:
-                loss = compute_loss(context_model(imgs.cuda()), tgts.long().cuda())
-                optimizer.zero_grad()
-                loss.backward()
-                pbar.set_description(str(loss))
-                optimizer.step()
-        loss.detach()
+        if args.mode_rewrite == 'layer_loss':
+            layer_outputs = {}
+            def forward_hook(module, input, output):
+                layer_outputs['output'] = output 
+
+            layer_outputs2 = {}
+            def forward_hook2(module, input, output):
+                layer_outputs2['output'] = output 
+
+            for name, module in context_model.named_modules():
+                if name == first_layer:
+                    print('registering forward hook...')
+                    h = module.register_forward_hook(forward_hook)
+
+            def get_goal_attn(model, imgs):
+                model.eval()
+                with torch.no_grad():
+                    model(imgs.cuda())
+            get_goal_attn(context_model, train_data['imgs'][:args.ntrain].float())
+            h.remove()
+
+            for name, module in context_model.named_modules():
+                if name == first_layer:
+                    print('registering forward hook...')
+                    hh = module.register_forward_hook(forward_hook2)
+                # elif name not in first_layer:
+                #     module.requires_grad = False
+                # else:
+                #     print(name)
+            edit_model = nethook.subsequence(context_model, 
+                                                first_layer=first_layer,
+                                                share_weights=True)
+            edit_params = edit_model.parameters()
+            print(edit_params)
+
+            optimizer = ch.optim.SGD(edit_params, lr=args.lr)
+            # compute_loss = torch.nn.MSELoss()
+            compute_loss1 = torch.nn.CrossEntropyLoss()
+            compute_loss2 = torch.nn.MSELoss()
+            pbar = tqdm(range(args.nsteps))
+            
+            imgs = train_data['modified_imgs'][:args.ntrain].float()
+            target_label = np.unique(train_data['labels'][:args.ntrain].numpy())
+            assert len(target_label) == 1
+            
+            tgts = ch.tensor([target_label[0]] * len(imgs))
+            
+            with torch.enable_grad():
+                for i in pbar:
+                    context_model(imgs.cuda())
+                    # loss = compute_loss1(context_model(imgs.cuda()), tgts.long().cuda()) 
+                    cls_loss = compute_loss1(context_model(imgs.cuda()), tgts.long().cuda())
+                    layer_loss = compute_loss2(layer_outputs2['output'], layer_outputs['output'])
+                    wandb.log({'layer loss': layer_loss.item(), "XEtpy loss": cls_loss.item()})
+                    loss = cls_loss + layer_loss
+                    optimizer.zero_grad()
+                    loss.backward()
+                    pbar.set_description(str(loss))
+                    optimizer.step()
+            loss.detach()
+            hh.remove()
+        else:
+            if args.mode_rewrite == 'finetune_local':
+                edit_params = [target_weights(target_model)]
+            else:
+                edit_model = nethook.subsequence(context_model, 
+                                                first_layer=first_layer,
+                                                share_weights=True)
+                
+                edit_params = edit_model.parameters()
+                
+                if args.arch.startswith('clip'):
+                    edit_params = []
+                    for name, param in edit_model.named_parameters():
+                        if 'visual' in name:
+                            edit_params.append(param)
+
+            optimizer = ch.optim.SGD(edit_params, lr=args.lr)
+            compute_loss = torch.nn.CrossEntropyLoss()
+            pbar = tqdm(range(args.nsteps))
+            
+            imgs = train_data['modified_imgs'][:args.ntrain].float()
+            target_label = np.unique(train_data['labels'][:args.ntrain].numpy())
+            assert len(target_label) == 1
+            
+            tgts = ch.tensor([target_label[0]] * len(imgs))
+            
+            with torch.enable_grad():
+                for i in pbar:
+                    loss = compute_loss(context_model(imgs.cuda()), tgts.long().cuda())
+                    optimizer.zero_grad()
+                    loss.backward()
+                    pbar.set_description(str(loss))
+                    optimizer.step()
+            loss.detach()
        
     return context_model

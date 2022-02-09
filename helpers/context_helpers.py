@@ -13,6 +13,7 @@ from tools import tally, pbar, renormalize, imgviz
 features = {}
 
 def get_context_model(model, layernum, arch):
+    print("ARCH ", arch)
 
     def hook_feature(module, input, output):
         features['pre'] = input[0]

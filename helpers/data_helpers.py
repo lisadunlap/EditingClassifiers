@@ -13,11 +13,7 @@ from tools.custom_folder import ImageFolder
 from omegaconf import OmegaConf
 
 from helpers.waterbirds import Waterbirds, WaterbirdsBoring, WaterbirdsSimple
-
-# overrides = OmegaConf.from_cli(flags.overrides)
-cfg       = OmegaConf.load('configs/waterbirds.yaml')
-base_cfg  = OmegaConf.load('configs/base.yaml')
-args      = OmegaConf.merge(base_cfg, cfg)
+from helpers.planes import Planes, PlanesOrig, PlanesGroundSeg
 
 def tile_image(img):
     tiled = Image.new('RGB', (800,800), "black")
@@ -28,10 +24,22 @@ def tile_image(img):
             pixels_tiled[i,j] = pixels[i % 256,j % 256]
     return tiled
 
+def get_config(name="Waterbirds"):
+    base_cfg  = OmegaConf.load('configs/base.yaml')
+    if "Waterbirds" in name:
+        cfg       = OmegaConf.load('configs/waterbirds.yaml')
+    elif "Planes" in name:
+        cfg       = OmegaConf.load('configs/planes.yaml')
+    else:
+        raise ValueError("Dataset config not found")
+    args      = OmegaConf.merge(base_cfg, cfg)
+    return args
+
 def get_dataset(dataset_name, dataset_path, 
                 batch_size=32, workers=8):
-    assert dataset_name in ['ImageNet', 'Places365', 'Waterbirds', 'WaterbirdsSimple']
+    assert dataset_name in ['ImageNet', 'Places365', 'Waterbirds', 'WaterbirdsSimple', 'Planes', 'PlanesBalanced']
     if dataset_name == 'Waterbirds':
+        args = get_config('Waterbirds')
         transform = transforms.Compose([
             transforms.Resize((224,224)),
             transforms.ToTensor(),
@@ -41,6 +49,7 @@ def get_dataset(dataset_name, dataset_path,
         testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
         return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'WaterbirdsSimple':
+        args = get_config('Waterbirds')
         transform = transforms.Compose([
             transforms.Resize((224,224)),
             transforms.ToTensor(),
@@ -48,6 +57,28 @@ def get_dataset(dataset_name, dataset_path,
         ])
         trainset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
         testset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    elif dataset_name == 'Planes':
+        args = get_config('Planes')
+        args.DATA.BIAS_TYPE = 'bias_A'
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = Planes('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    elif dataset_name == 'PlanesBalanced':
+        args = get_config('Planes')
+        args.DATA.BIAS_TYPE = 'balanced'
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = Planes('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
         return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'ImageNet':
         dataset = datasets.ImageNet(dataset_path)
@@ -126,6 +157,7 @@ def get_waterbirds_data(dataset_path='./data/', pattern_img_path = './data/water
     return train_data, test_data
 
 def get_waterbirds_simple_data(dataset_path='./data/', pattern_img_path = './data/waterbirds/forest.jpg', nimgs=10):
+    args = get_config("Waterbirds")
     transform = transforms.Compose([
             transforms.Resize((224,224)),
             transforms.ToTensor(),
@@ -134,7 +166,7 @@ def get_waterbirds_simple_data(dataset_path='./data/', pattern_img_path = './dat
     dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
     mod_imgs, imgs, masks, labels = [], [], [], []
     for i, d in enumerate(dataset):
-        if i > nimgs:
+        if i >= nimgs:
             break
         pattern_img = transform(Image.open(pattern_img_path))[:3, :, :]
         modified_imgs = d['img'] * (1-d['mask']) + pattern_img * d['mask']
@@ -148,14 +180,59 @@ def get_waterbirds_simple_data(dataset_path='./data/', pattern_img_path = './dat
         'masks': ch.stack(masks),
         'labels': ch.stack(labels)
     }
+    transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor()
+        ])
     test_dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
-    test = ch.load('./data/waterbirds/data_test_normalized.pt')
     test_data = {
         0:[],
         1:[]
     }
     for d in test_dataset:
         test_data[int(d['label'])].append(d['img'])
+
+    test_data[0] = ch.stack(test_data[0])
+    test_data[1] = ch.stack(test_data[1])
+    
+    return train_data, test_data
+
+def get_planes_trian_data(dataset_path='./', pattern_img_path = './data/planes_ground_seg/grass.jpeg', nimgs=5, plane="Airbus", ground="road"):
+    transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    args = get_config("Planes")
+    dataset  = PlanesGroundSeg(dataset_path, transform=transform, plane=plane, ground=ground)
+    mod_imgs, imgs, masks, labels = [], [], [], []
+    for i, d in enumerate(dataset):
+        if i >= nimgs:
+            break
+        pattern_img = transform(Image.open(pattern_img_path))[:3, :, :]
+        modified_imgs = d['img'] * (1-d['mask']) + pattern_img * d['mask']
+        imgs.append(d['img'])
+        masks.append(d['mask'])
+        labels.append(d['label'])
+        mod_imgs.append(modified_imgs)
+    train_data = {
+        'imgs': ch.stack(imgs),
+        'modified_imgs': ch.stack(mod_imgs),
+        'masks': ch.stack(masks),
+        'labels': ch.stack(labels)
+    }
+    transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    test_dataset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+    test_data = {
+        0:[],
+        1:[]
+    }
+    for d in test_dataset:
+        test_data[int(d[1])].append(d[0])
 
     test_data[0] = ch.stack(test_data[0])
     test_data[1] = ch.stack(test_data[1])
