@@ -1,3 +1,22 @@
+
+# Editing Classifiers + Transformers
+
+This repo extends the work:
+**Editing a classifier by rewriting its prediction rules** <br>
+*Shibani Santurkar\*, Dimitris Tsipras\*, Mahi Elango, David Bau, Antonio Torralba, Aleksander Madry* <br>
+Paper: https://arxiv.org/abs/2112.01008 <br>
+
+The idea is to extend this technique to transformers as well as try applying this to a few other scenarios
+
+To train a model on one of the datasets normally, just run:
+`python train.py --lr 0.01 --checkpoint-name [CHECKPOINT_NAME] --dataset [DATASET] --model [MODEL]`
+For example:
+`python train.py --lr 0.01 --checkpoint-name Waterbirds-vit --dataset Waterbirds --model ViT`
+
+To edit a classifier using the original papers method:
+`python edit.py --layernum 10 --dataset ImageNet --arch vgg16 --test-ext --rewrite-mode editing --lr 0.0001`
+
+# Original Repo README
 This repository contains the code and data for our paper:
 
 **Editing a classifier by rewriting its prediction rules** <br>
