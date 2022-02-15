@@ -62,6 +62,7 @@ run = wandb.init(project=args.proj, group=args.dataset, config=args)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
+best_classes = [0, 0]
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
 # Data
@@ -169,7 +170,7 @@ def train(epoch):
 
 
 def test(epoch):
-    global best_acc
+    global best_acc, best_classes
     # metric = ConfusionMatrix(num_classes=3)
     # metric.attach(default_evaluator, 'cm')
     net.eval()
@@ -230,6 +231,9 @@ def test(epoch):
                     wandb.save(f'./checkpoint/ckpt-{args.model}.pth')
         best_acc = acc
         wandb.summary['best acc'] = best_acc
+        wandb.summary[f"{CD[0]} best acc"] = class_accuracy[0]
+        wandb.summary[f"{CD[1]} best acc"] = class_accuracy[1]
+        wandb.summary['best val epoch'] = epoch
 
 if args.eval_only:
     test(start_epoch)

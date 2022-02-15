@@ -6,6 +6,9 @@ helpers/__pycache__/
 models/__pycache__/
 cache/
 data/
+attention_data/
+checkpoint/
+checkpoints/
 
 # C extensions
 *.so
