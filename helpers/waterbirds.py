@@ -12,7 +12,7 @@ def get_label_mapping():
     return np.array(['Landbird', 'Waterbird'])
 
 class WaterbirdsOrig(torch.utils.data.Dataset):
-    def __init__(self, root, cfg, split='train', transform=None, metadata='/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2/metadata.csv'):
+    def __init__(self, root, cfg, split='train', transform=None, metadata=None):
         self.cfg = cfg
         # self.original_root       = os.path.expanduser(root)
         self.original_root = root
@@ -37,7 +37,7 @@ class WaterbirdsOrig(torch.utils.data.Dataset):
         # metadata
         # self.metadata_df = pd.read_csv(
         #     os.path.join(self.root, 'metadata.csv'))
-        self.metadata_df = pd.read_csv(metadata)
+        self.metadata_df = pd.read_csv(cfg.DATA.METADATA)
 
         # Get the y values
         self.labels = self.metadata_df['y'].values
@@ -254,7 +254,6 @@ class Waterbirds(WaterbirdsOrig):
 class WaterbirdsBoring(WaterbirdsOrig):
 
     def __init__(self, root, cfg, split='train', transform=None, 
-                    metadata='/shared/lisabdunlap/vl-attention/data/waterbird_1.0_forest2water2/metadata.csv', 
                     land_background='/home/lisabdunlap/EditingClassifiers/data/waterbirds/forest.jpg', 
                     water_background='/home/lisabdunlap/EditingClassifiers/data/waterbirds/ocean_2.jpg'):
         super().__init__(root, cfg, split, transform, metadata)
@@ -266,7 +265,8 @@ class WaterbirdsBoring(WaterbirdsOrig):
         new_results = results.copy()
         mask_copy = np.ones(results['seg'].shape)
         train_masks = np.logical_xor(mask_copy, results['seg'])
-        pattern_img_path = self.land_background if results['place'] == 0 else self.water_background
+        # place =  0 -> land place = 1 -> water
+        pattern_img_path = self.land_background if results['place'] == 1 else self.water_background
         if self.transform:
             pattern_img = self.transform(Image.open(pattern_img_path))[:3, :, :]
             modified_img = results['image'] * (1-train_masks) + pattern_img * train_masks
@@ -330,18 +330,18 @@ def get_loss_upweights(bias_fraction=0.95, mode='per_class'):
 
     return weights
 
-class WaterbirdsEditing(WaterbirdsOrig):
+# class WaterbirdsEditing(WaterbirdsOrig):
 
-    def __init__(self, root, cfg, split='train', transform=None):
-        super().__init__(root, cfg, split, transform, metadata='/home/lisabdunlap/EditingClassifiers/data/waterbirds/land_birds.csv')
-        # df = pd.read_csv('/home/lisabdunlap/EditingClassifiers/data/waterbirds/metadata.csv')
-        # df['img_id']
+#     def __init__(self, root, cfg, split='train', transform=None):
+#         super().__init__(root, cfg, split, transform, metadata='/home/lisabdunlap/EditingClassifiers/data/waterbirds/land_birds.csv')
+#         # df = pd.read_csv('/home/lisabdunlap/EditingClassifiers/data/waterbirds/metadata.csv')
+#         # df['img_id']
 
-    def __getitem__(self, index):
+#     def __getitem__(self, index):
 
-        results = super().__getitem__(index)
-        return {
-            'img': results['image'], 
-            'mask': results['seg'], 
-            'label': results['label']
-            }
+#         results = super().__getitem__(index)
+#         return {
+#             'img': results['image'], 
+#             'mask': results['seg'], 
+#             'label': results['label']
+#             }

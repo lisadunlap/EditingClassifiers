@@ -26,8 +26,12 @@ def tile_image(img):
 
 def get_config(name="Waterbirds"):
     base_cfg  = OmegaConf.load('configs/base.yaml')
-    if "Waterbirds" in name:
+    if name == "Waterbirds":
         cfg       = OmegaConf.load('configs/waterbirds.yaml')
+    elif name == "WaterbirdsTiny":
+        cfg       = OmegaConf.load('configs/waterbirds_tiny.yaml')
+    elif name == "Waterbirds95":
+        cfg       = OmegaConf.load('configs/waterbirds_95.yaml')
     elif "Planes" in name:
         cfg       = OmegaConf.load('configs/planes.yaml')
     else:
@@ -37,9 +41,29 @@ def get_config(name="Waterbirds"):
 
 def get_dataset(dataset_name, dataset_path, 
                 batch_size=32, workers=8):
-    assert dataset_name in ['ImageNet', 'Places365', 'Waterbirds', 'WaterbirdsSimple', 'Planes', 'PlanesBalanced']
+    assert dataset_name in ['ImageNet', 'Places365', 'Waterbirds', 'Waterbirds95', 'WaterbirdsTiny', 'WaterbirdsSimple', 'Planes', 'PlanesBalanced']
     if dataset_name == 'Waterbirds':
         args = get_config('Waterbirds')
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    if dataset_name == 'Waterbirds95':
+        args = get_config('Waterbirds95')
+        transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+    if dataset_name == 'WaterbirdsTiny':
+        args = get_config('WaterbirdsTiny')
         transform = transforms.Compose([
             transforms.Resize((224,224)),
             transforms.ToTensor(),
@@ -184,17 +208,20 @@ def get_waterbirds_simple_data(dataset_path='./data/', pattern_img_path = './dat
             transforms.Resize((224,224)),
             transforms.ToTensor()
         ])
-    test_dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
-    test_data = {
-        0:[],
-        1:[]
-    }
-    for d in test_dataset:
-        test_data[int(d['label'])].append(d['img'])
 
-    test_data[0] = ch.stack(test_data[0])
-    test_data[1] = ch.stack(test_data[1])
-    
+    test_data = ch.load('data/waterbirds/simple_test_data.pt')
+    # test_dataset = WaterbirdsBoring('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+    # test_data = {
+    #     0:[],
+    #     1:[]
+    # }
+    # for d in test_dataset:
+    #     test_data[int(d['label'])].append(d['img'])
+
+    # test_data[0] = ch.stack(test_data[0])
+    # test_data[1] = ch.stack(test_data[1])
+    # ch.save(test_data, 'data/waterbirds/simple_test_data.pt')
+
     return train_data, test_data
 
 def get_planes_trian_data(dataset_path='./', pattern_img_path = './data/planes_ground_seg/grass.jpeg', nimgs=5, plane="Airbus", ground="road"):

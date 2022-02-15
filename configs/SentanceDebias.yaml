@@ -1,0 +1,6 @@
+EXP:
+  ADVICE_METHOD: "SentenceDebias"
+  
+
+DATA:
+  DATASET: "Waterbirds"

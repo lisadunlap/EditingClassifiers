@@ -8,13 +8,29 @@ Paper: https://arxiv.org/abs/2112.01008 <br>
 
 The idea is to extend this technique to transformers as well as try applying this to a few other scenarios
 
+### Training
 To train a model on one of the datasets normally, just run:
 `python train.py --lr 0.01 --checkpoint-name [CHECKPOINT_NAME] --dataset [DATASET] --model [MODEL]`
 For example:
 `python train.py --lr 0.01 --checkpoint-name Waterbirds-vit --dataset Waterbirds --model ViT`
 
+### Editing CNNs
 To edit a classifier using the original papers method:
-`python edit.py --layernum 10 --dataset ImageNet --arch vgg16 --test-ext --rewrite-mode editing --lr 0.0001`
+`python edit.py --layernum 12 --dataset ImageNet --arch vgg16 --rewrite-mode editing`
+
+You can also run their baselines via:
+`python edit.py --layernum 12 --dataset ImageNet --arch vgg16 --rewrite-mode finetune_local`
+`python edit.py --layernum 12 --dataset ImageNet --arch vgg16 --rewrite-mode finetune_global`
+
+I also added in one more baseline `layer_loss`, which is simply an L2 loss between the layers of the network (so their method but simplified and does not use an instance segmentation mask)
+
+All the Car-snow results are run on an extended validation set that I curated because I trust no one. To run on the extended validation set simply add the `--test-ext` flag to your command
+
+### Editing Transformers
+The transformer model I am using is ViT-B/16, which should be in [models/vit.py](models/vit.py). 
+
+To run the editing tests for transformers with the attention loss:
+`python finetune_vit.py --edit-type editing_scores --layernum 8.attn --test-ext --lr 0.01`
 
 # Original Repo README
 This repository contains the code and data for our paper:

@@ -1,0 +1,75 @@
+
+
+DATA:
+  DATASET: "planes"
+  NUM_CLASSES: 2
+  SEPARATE_CLASSES: True
+
+  BATCH_SIZE: 96
+
+  CONFOUNDING_FACTOR: 0.95
+  PLANES_DIR: 'planes'
+  REMOVE_BACKGROUND: False
+  CROP_BIRD: False
+  DRAW_SQUARE: False
+  CROP: True
+
+  USE_CLASS_WEIGHTS: False
+  USE_GROUP_WEIGHTS: False
+  BIAS_TYPE: 'bias_A'
+  BIAS_MODE: 'grass_road'
+  MASK_PIXELS: False
+
+  ADD_ROTATIONS: False
+  ROTATION_PROBABILITY: 0.0
+  ATTENTION_DIR: "NONE"
+
+EXP:
+  APPROACH: "generic"
+  NUM_TRIALS: 1
+
+  MODEL: "resnet50"
+  PRETRAINED: True
+
+  LOSSES:
+    # LOG setting is used to compute & log loss, but without including it
+    # in the actual training loss backward pass. It is also not added to the
+    # "total_loss" metrics.
+    # Throws error if both LOG and COMPUTE are True.
+
+    CLASSIFICATION:
+      WEIGHT: 1
+    GRADIENT_OUTSIDE:
+      COMPUTE: False
+      LOG: False
+      WEIGHT: 0.01
+      CRITERION: "L1"
+      GT: "segmentation"
+    GRADIENT_INSIDE:
+      COMPUTE: False
+      LOG: False
+      WEIGHT: 1
+      CRITERION: "L1"
+      GT: "segmentation"
+    GRADCAM:
+      COMPUTE: False
+      LOG: False
+      WEIGHT: 1
+      CRITERION: "L1"
+      GT: "segmentation"
+      MODE: "suppress_outside" # match, suppress_outside
+
+
+  NUM_EPOCHS: 50
+  OPTIMIZER: "SGD"
+  WEIGHT_DECAY: 1e-5
+  MOMENTUM: 0.9
+
+  SCHEDULER: "NONE"
+
+  BASE:
+    LR: 0.01
+
+  CLASSIFIER:
+    LR: 0.001
+
