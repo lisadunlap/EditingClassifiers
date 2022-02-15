@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
+helpers/__pycache__/
+models/__pycache__/
+cache/
+data/
 
 # C extensions
 *.so
