@@ -1,4 +1,5 @@
 from ast import parse
+from cgi import test
 from pathlib import PureWindowsPath
 import sys, os, warnings
 from argparse import Namespace
@@ -29,10 +30,10 @@ from helpers.waterbirds import Waterbirds
 from helpers.waterbirds import Waterbirds, WaterbirdsEditing
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--dataset', default="Waterbirds", help='dataset')
+parser.add_argument('--dataset', default="ImageNet", help='dataset')
 parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
 parser.add_argument('--arch', default='resnet50', help='model')
-parser.add_argument('--rewrite-mode' , default='editing', help='choose from editing, local_finetuning, global_finetuning')
+parser.add_argument('--rewrite-mode' , default='editing', choices=['editing', 'finetune_local', 'finetune_global', 'layer_loss'], help='choose from editing, local_finetuning, global_finetuning')
 parser.add_argument('--layernum', '-m', default=12, type=int, help='layer to rewrite')
 parser.add_argument('--proj', '-p', default='EditingClassifiers', type=str, help='project name')
 parser.add_argument('--pattern-file', default='./data/waterbirds/forest_broadleaf.jpg', help='pattern file for waterbirds')
@@ -41,7 +42,13 @@ parser.add_argument('--nsteps-proj', default=10, type=int, help='Frequency of we
 parser.add_argument('--rank', default=1, type=int, help='Rank of subspace to project weights')
 parser.add_argument('--ntrain', default=1, type=int, help='Number of training samples')
 parser.add_argument('--test-ext', action='store_true', help='extended test set')
+parser.add_argument('--wandb-silent', action='store_true', help='turn off wandb logging')
+parser.add_argument('--nsteps', type=int, help='num steps for training')
+parser.add_argument('--binary', action='store_true')
 args = parser.parse_args()
+
+if args.wandb_silent:
+    os.environ['WANDB_SILENT']="true"
 
 run = wandb.init(project=args.proj, group=args.dataset, config=args)
 
@@ -49,6 +56,9 @@ DATASET_NAME = args.dataset
 LAYERNUM = args.layernum
 REWRITE_MODE = args.rewrite_mode
 ARCH = args.arch
+STEPS = 20000 if REWRITE_MODE == 'editing' else 400
+if args.nsteps:
+    STEPS = args.nsteps
 
 # load model
 ret = classifier_helpers.get_default_paths(DATASET_NAME, arch=ARCH)
@@ -59,12 +69,14 @@ model, context_model, target_model = ret[:3]
 
 
 # load data
-base_dataset, train_loader, val_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
+base_dataset, train_loader, val_loader, test_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
                                                         batch_size=32, workers=8)
 if args.dataset == 'Waterbirds':
     train_data, test_data = dh.get_waterbirds_data(pattern_img_path=args.pattern_file)
 elif args.dataset == 'WaterbirdsSimple':
     train_data, test_data = dh.get_waterbirds_simple_data()
+elif args.dataset == 'Planes':
+    train_data, test_data = dh.get_planes_trian_data('./', plane='Boeing')
 else:
     train_data, test_data, test_ext_data = dh.get_vehicles_on_snow_data(DATASET_NAME, CD)
     if args.test_ext:
@@ -73,6 +85,8 @@ else:
 # wandb save training
 wandb_imgs = [wandb.Image(i) for i in train_data['imgs']]
 wandb.log({'training images': wandb_imgs})
+wandb_imgs = [wandb.Image(i) for i in train_data['modified_imgs']]
+wandb.log({'mod training images': wandb_imgs})
 
 print("Original accuracy on testset")
 
@@ -85,6 +99,7 @@ def chunks(lst, n):
 RESULTS = {k: {'preds': {}, 'acc': {}} for k in ['pre', 'post']}
 GLOBAL_RESULTS = {k: {'preds': {}, 'acc': {}} for k in ['pre', 'post']}
 sub_batch = 32
+
 for c, x in test_data.items():
     generator = chunks(x, sub_batch)
     correct = []
@@ -98,7 +113,7 @@ for c, x in test_data.items():
     RESULTS['pre']['preds'][c] = pred
 
 print('------- SNOW CLASSES -------')
-if 'Waterbirds' not in args.dataset:
+if args.dataset == 'ImageNet':
     accuracy, pred, pre_results = nt.test_imagenet_snow(model)
     for c in pre_results:
         print(f'Class: {c}/{CD[c]} | Accuracy: {pre_results[c]:.2f}',) 
@@ -109,7 +124,7 @@ train_args = {'ntrain': args.ntrain, # Number of exemplars
             'arch': ARCH, # Network architecture
             'mode_rewrite': REWRITE_MODE, # Rewriting method ['editing', 'finetune_local', 'finetune_global']
             'layernum': LAYERNUM, # Layer to modify
-            'nsteps': 20000 if REWRITE_MODE == 'editing' else 400, # Number of rewriting steps  
+            'nsteps': STEPS, # Number of rewriting steps  
             'lr': args.lr, # Learning rate
             'restrict_rank': not args.restrict_rank, # Whether or not to perform low-rank update
             'nsteps_proj': args.nsteps_proj, # Frequency of weight projection
@@ -122,7 +137,7 @@ context_model = rh.edit_classifier(train_args,
                                    train_data, 
                                    context_model, 
                                    target_model=target_model, 
-                                   val_loader=val_loader,
+                                   val_loader=val_loaders,
                                    caching_dir=f"./cache/covariances/{DATASET_NAME}_{ARCH}_layer{LAYERNUM}") # caching_dir=f"./cache/covariances/{DATASET_NAME}_{ARCH}_layer{LAYERNUM}"
 
 # eval modified classifier
@@ -143,7 +158,7 @@ for c, x in test_data.items():
     wandb.summary[f"{CD[c]} acc dif"] = acc - RESULTS["pre"]["acc"][c]
 
 print('------- SNOW CLASSES -------')
-if 'Waterbirds' not in args.dataset:
+if args.dataset == 'ImageNet':
     accuracy, pred, post_results = nt.test_imagenet_snow(model)
     for c in post_results:
         print(f'Class: {c}/{CD[c]} | Accuracy: {post_results[c]:.2f}',) 

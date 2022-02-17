@@ -138,6 +138,7 @@ class Embeddings(nn.Module):
             patch_size = _pair(config.patches["size"])
             n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
             self.hybrid = False
+        print("num patches ", n_patches)
 
         # if self.hybrid:
         #     self.hybrid_model = ResNetV2(block_units=config.resnet.num_layers,

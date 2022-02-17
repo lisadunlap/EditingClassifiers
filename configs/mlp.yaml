@@ -1,0 +1,16 @@
+EXP:
+  ADVICE_METHOD: "MLPDebias"
+  WANDB_SILENT: False
+  PROJ: "CLIPAdvice"
+  SEED: 0
+  CHECKPOINT_NAME: "testing"
+  TEXT_PROMPTS:  [["a photo of land", "an image of land", "a photo of a forest", "an image of a forest"], [ "a photo of water", "an image of water", "a photo of a lake", "an image of a lake"]]
+
+DATA:
+  DATASET: "Waterbirds"
+  LABELS: ["landbird", "waterbird"]
+
+MODEL:
+  NUM_LAYERS: 1
+  DOM_WEIGHT: 1.0
+  LR: 0.0001

@@ -74,7 +74,7 @@ REWRITE_MODE = 'editing'
 ARCH = args.model
 MODEL_PATH = '/home/lisabdunlap/EditingClassifiers/models/waterbirds.ckpt'
 
-base_dataset, trainloader, testloader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
+base_dataset, trainloader, valloader, testloader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
                                                         batch_size=96, workers=8)
 
 # log some example images
@@ -179,7 +179,7 @@ def test(epoch):
     total = 0
     y_true, y_pred = np.array([]), np.array([])
     with torch.no_grad():
-        for batch_idx, (input, label) in enumerate(testloader):
+        for batch_idx, (input, label) in enumerate(valloader):
             inputs, targets = input.to(device), label.long().to(device)
             if args.model == 'ViT':
                 outputs, attn = net(inputs)
@@ -198,10 +198,10 @@ def test(epoch):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
             y_true = np.append(y_true, targets.to('cpu').numpy())
-            y_pred = np.append(predicted.to('cpu').numpy(), y_pred)
+            y_pred = np.append(y_pred, predicted.to('cpu').numpy())
             # log classifications
 
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            progress_bar(batch_idx, len(valloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
         cf_matrix = confusion_matrix(np.array(y_true), np.array(y_pred))
         class_accuracy=100*cf_matrix.diagonal()/cf_matrix.sum(1)

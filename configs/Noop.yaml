@@ -1,0 +1,15 @@
+EXP:
+  ADVICE_METHOD: "Noop"
+  WANDB_SILENT: False
+  PROJ: "CLIPAdvice"
+  SEED: 0
+  TEXT_PROMPTS: []
+  
+
+DATA:
+  DATASET: "Waterbirds"
+  LOAD_FROM: "data/waterbirds/clip_embeddings.pth"
+  BATCH_SIZE: 32
+
+MODEL:
+  NUM_LAYERS: 1

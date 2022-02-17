@@ -29,6 +29,7 @@ import helpers.data_helpers as dh
 import helpers.context_helpers as coh
 import helpers.rewrite_helpers as rh
 import helpers.vis_helpers as vh
+import torch.backends.cudnn as cudnn
 
 import matplotlib.pyplot as plt
 import random
@@ -55,8 +56,8 @@ parser.add_argument('--proj', default='finetuneViT', type=str, help='WandB proje
 parser.add_argument('--test-ext', action='store_true', help='extended test set')
 parser.add_argument('--match-context', action='store_true', help='loss is between context')
 parser.add_argument('--l1', action='store_true', help='L1 instead of L2 loss')
+parser.add_argument('--batch-size', type=int, default=32, help='eval batch size')
 args = parser.parse_args()
-
 
 run = wandb.init(project=args.proj, group=args.edit_type, config=args)
 
@@ -67,17 +68,20 @@ if not os.path.isfile("attention_data/ViT-B_16-224.npz"):
     urlretrieve("https://storage.googleapis.com/vit_models/imagenet21k+imagenet2012/ViT-B_16-224.npz", "attention_data/ViT-B_16-224.npz")
 
 imagenet_labels = dict(enumerate(open('attention_data/ilsvrc2012_wordnet_lemmas.txt')))
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 DATASET_NAME = args.dataset
-LAYERNUM = 12
-REWRITE_MODE = 'editing'
-ARCH = 'vgg16'
+LAYERNUM = args.layernum
+REWRITE_MODE = args.edit_type
+ARCH = 'ViT'
 ret = classifier_helpers.get_default_paths(DATASET_NAME, arch=ARCH)
 DATASET_PATH, MODEL_PATH, MODEL_CLASS, ARCH, CD = ret
-ret = classifier_helpers.load_classifier(MODEL_PATH, MODEL_CLASS, ARCH,
+model = classifier_helpers.load_classifier(MODEL_PATH, MODEL_CLASS, ARCH,
                             DATASET_NAME, LAYERNUM) 
+if device == 'cuda':
+    model = torch.nn.DataParallel(model)
+    cudnn.benchmark = True
 
-model, context_model, target_model = ret[:3]
 if args.dataset == 'Waterbirds':
     train_data, test_data = dh.get_waterbirds_data(pattern_img_path=args.pattern_file)
 elif args.dataset == 'WaterbirdsSimple':
@@ -86,31 +90,30 @@ else:
     train_data, test_data, test_ext_data = dh.get_vehicles_on_snow_data(DATASET_NAME, CD)
     if args.test_ext:
         test_data = test_ext_data
-if args.test_ext:
-    test_data = test_ext_data
 
-base_dataset, train_loader, val_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
+base_dataset, train_loader, val_loader, test_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
                                                         batch_size=16, workers=8)
-
-# Prepare Model
-config = CONFIGS["ViT-B_16"]
-model = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True)
-model.load_from(np.load("attention_data/ViT-B_16-224.npz"))
-model = model.cuda()
-model.eval()
 
 print("Original accuracy on test vehicles-on-snow data")
 
 RESULTS = {k: {'preds': {}, 'acc': {}} for k in ['pre', 'post']}
 GLOBAL_RESULTS = {k: {'preds': {}, 'acc': {}} for k in ['pre', 'post']}
 
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
 def eval(test_data, model, RESULTS, mode='pre', verbose=True):
     for c, x in test_data.items():
-        with torch.no_grad():
-            logits, att_mat = model(x.cuda())
-            probs = torch.nn.Softmax(dim=-1)(logits)
-            pred = probs.argmax(axis=1)
-        correct = [p for p in pred if p == c]
+        generator = chunks(x, args.batch_size)
+        correct = []
+        for b in generator:
+            with torch.no_grad():
+                logits, att_mat = model(b.cuda())
+                probs = torch.nn.Softmax(dim=-1)(logits)
+                pred = probs.argmax(axis=1)
+            correct += [p for p in pred if p == c]
         acc = 100 * len(correct) / len(x)
         if verbose:
             print(f'Class: {c}/{CD[c]} | Accuracy: {acc:.2f}',) 
@@ -121,8 +124,8 @@ eval(test_data, model, RESULTS, verbose=False)
 if args.eval_imagenet: 
     RESULTS['pre']['acc']['global'] = nt.test_imagenet_val(model, GLOBAL_RESULTS)
 
-print('------- SNOW CLASSES -------')
 if 'Waterbirds' not in args.dataset:
+    print('------- SNOW CLASSES -------')
     accuracy, pred, pre_results = nt.test_imagenet_snow(model, vit=True)
     for c in pre_results:
         print(f'Class: {c}/{CD[c]} | Accuracy: {pre_results[c]:.2f}',) 
@@ -141,9 +144,9 @@ if 'editing' in args.edit_type:
         attns2['scores'] = output[1]
     
     if 'attn' in args.layernum:
-        h = model.transformer.encoder.layer[int(args.layernum.replace('.attn', ''))].attn.register_forward_hook(hook_act)
+        h = model.module.transformer.encoder.layer[int(args.layernum.replace('.attn', ''))].attn.register_forward_hook(hook_act)
     else:
-        h = model.transformer.encoder.layer[int(args.layernum)].register_forward_hook(hook_act)
+        h = model.module.transformer.encoder.layer[int(args.layernum)].register_forward_hook(hook_act)
 
     def get_goal_attn(model, imgs):
         model.eval()
@@ -157,9 +160,9 @@ if 'editing' in args.edit_type:
 
     # now train
     if 'attn' in args.layernum:
-        hh = model.transformer.encoder.layer[int(args.layernum.replace('.attn', ''))].attn.register_forward_hook(hook_act2)
+        hh = model.module.transformer.encoder.layer[int(args.layernum.replace('.attn', ''))].attn.register_forward_hook(hook_act2)
     else:
-        hh = model.transformer.encoder.layer[int(args.layernum)].register_forward_hook(hook_act2)
+        hh = model.module.transformer.encoder.layer[int(args.layernum)].register_forward_hook(hook_act2)
 
     if args.edit_type == 'editing_local':
         for name, param in model.named_parameters():
@@ -204,64 +207,6 @@ if 'editing' in args.edit_type:
             wandb.log({'loss': loss.item()})
     loss.detach()
     hh.remove()
-elif args.edit_type == 'edit_mask':
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    if args.l1:
-        compute_loss = torch.nn.L1Loss()
-    else:
-        compute_loss = torch.nn.MSELoss()
-    pbar = tqdm(range(args.niter))
-
-    def get_attn_mask(att_mats):
-        ret = []
-        for att_mat in att_mats:
-            print(len(att_mats), att_mat.shape)
-            att_mat = att_mat.squeeze(1)
-
-            # Average the attention weights across all heads.
-            att_mat = torch.mean(att_mat, dim=1)
-
-            # To account for residual connections, we add an identity matrix to the
-            # attention matrix and re-normalize the weights.
-            residual_att = torch.eye(att_mat.size(1)).cuda()
-            aug_att_mat = att_mat + residual_att
-            aug_att_mat = aug_att_mat / aug_att_mat.sum(dim=-1).unsqueeze(-1)
-
-            # Recursively multiply the weight matrices
-            joint_attentions = torch.zeros(aug_att_mat.size()).cuda()
-            joint_attentions[0] = aug_att_mat[0]
-
-            for n in range(1, aug_att_mat.size(0)):
-                joint_attentions[n] = torch.matmul(aug_att_mat[n], joint_attentions[n-1])
-            ret.append(joint_attentions[-1])
-        return torch.stack(ret)
-
-    model.eval()
-    imgs = train_data['imgs'][:args.ntrain].float()
-    target_label = np.unique(train_data['labels'][:args.ntrain].numpy())
-    with torch.no_grad():
-        # loss = compute_loss(model(imgs.cuda())[0], tgts.long().cuda())
-        logits, att_mat = model(imgs.cuda())
-        orig_masks = get_attn_mask(att_mat)
-    
-    # train 
-    model.train()
-    imgs = train_data['modified_imgs'][:args.ntrain].float()
-    target_label = np.unique(train_data['labels'][:args.ntrain].numpy())
-    assert len(target_label) == 1
-    with torch.enable_grad():
-        for i in pbar:
-            # loss = compute_loss(model(imgs.cuda())[0], tgts.long().cuda())
-            logits, att_mat = model(imgs.cuda())
-            mask = get_attn_mask(att_mat)
-            print(mask.shape)
-            loss = compute_loss(mask, orig_masks)
-            optimizer.zero_grad()
-            loss.backward()
-            pbar.set_description(str(loss))
-            optimizer.step()
-            wandb.log({'loss': loss.item()})
-    loss.detach()
 else:
     if args.edit_type == 'local_finetune':
         # fintune ONLY the layer specified 
@@ -303,11 +248,14 @@ model.eval()
 print("Change in accuracy on test vehicles-on-snow data \n")
 acc_changes = []
 for c, x in test_data.items():
-    with torch.no_grad():
-        logits, att_mat = model(x.cuda())
-        probs = torch.nn.Softmax(dim=-1)(logits)
-        pred = probs.argmax(axis=1)
-    correct = [p for p in pred if p == c]
+    generator = chunks(x, args.batch_size)
+    correct = []
+    for b in generator:
+        with torch.no_grad():
+            logits, att_mat = model(b.cuda())
+            probs = torch.nn.Softmax(dim=-1)(logits)
+            pred = probs.argmax(axis=1)
+        correct += [p for p in pred if p == c]
     acc = 100 * len(correct) / len(x)
     print(f'Class: {c}/{CD[c]} \n Accuracy change: {RESULTS["pre"]["acc"][c]:.2f} -> {acc:.2f} \n',) 
     RESULTS['post']['acc'][c] = acc
@@ -316,8 +264,8 @@ for c, x in test_data.items():
     acc_changes.append(acc - RESULTS["pre"]["acc"][c])
 wandb.summary['global acc change'] = np.mean(acc_changes)
 
-print('------- SNOW CLASSES -------')
 if 'Waterbirds' not in args.dataset:
+    print('------- SNOW CLASSES -------')
     accuracy, pred, post_results = nt.test_imagenet_snow(model, vit=True)
     for c in post_results:
         print(f'Class: {c}/{CD[c]} | Accuracy: {post_results[c]:.2f}',) 
@@ -331,5 +279,3 @@ if args.eval_imagenet:
     RESULTS['post']['acc']['global'] = nt.test_imagenet_val(model, GLOBAL_RESULTS)
     print(f'Global \n Accuracy change: {RESULTS["pre"]["acc"]["global"]:.2f} -> {RESULTS["post"]["acc"]["global"]:.2f} \n',) 
     wandb.summary['imagenet acc change'] = RESULTS["post"]["acc"]["global"] - RESULTS["pre"]["acc"]["global"]
-
-# wandb.log(RESULTS)

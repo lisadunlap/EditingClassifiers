@@ -35,7 +35,7 @@ def get_default_paths(dataset_name, arch='vgg16', binary=False):
             model_path = './checkpoints/imagenet_vgg.pt.best'
             model_class, arch = vgg16_bn(), 'vgg16_bn'
         elif arch == 'ViT':
-            model_path = "./attention_data/ViT-B_16-224.npz"
+            model_path = "./checkpoints/imagenet-vit.pth"
             config = CONFIGS["ViT-B_16"]
             model_class, arch = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True), 'ViT'
             model_class.load_from(np.load("./attention_data/ViT-B_16-224.npz"))
@@ -75,6 +75,12 @@ def get_default_paths(dataset_name, arch='vgg16', binary=False):
             model_class, arch = resnet50(num_classes=1000), 'resnet50'
             model_class = load_checkpoint(model_class, "ImageNet", './checkpoints/imagenet_resnet50.ckpt')
             model_class.layer17.fc = nn.Linear(2048, num_classes)
+        elif arch == 'ViT':
+            model_path = './checkpoints/planes-vit.pth'
+            config = CONFIGS["ViT-B_16"]
+            model_class, arch = VisionTransformer(config, num_classes=1000, zero_head=False, img_size=224, vis=True), 'ViT'
+            model_class.load_from(np.load("attention_data/ViT-B_16-224.npz"))
+            model_class.head = nn.Linear(768, num_classes)
     elif dataset_name == 'PlanesBalanced':
         data_path = '/shared/lisabdunlap/vl-attention/data/planes'
         label_map = {0: 'Airbus', 1: 'Boeing'}
@@ -131,7 +137,7 @@ def load_checkpoint(model, dataset, resume_path,
         return load_clip(arch)
 
     
-    checkpoint = ch.load(resume_path, pickle_module=dill)
+    checkpoint = ch.load(resume_path, pickle_module=dill, map_location='cuda')
     if isinstance(model, str):
         model = dataset.get_model(model, False).cuda()
         model.eval()

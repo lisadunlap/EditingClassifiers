@@ -2,8 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
-helpers/__pycache__/
-models/__pycache__/
+helpers/__pycache__
+models/__pycache__
 cache/
 data/
 attention_data/
@@ -12,6 +12,7 @@ checkpoints/
 
 # C extensions
 *.so
+*.pyc
 
 # Distribution / packaging
 .Python

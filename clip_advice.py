@@ -22,35 +22,56 @@ from sklearn.metrics import confusion_matrix
 
 import helpers.new_testing as nst
 from helpers.new_testing import IMAGENET_CLASSES
-from helpers.waterbirds import Waterbirds
 
 import helpers.clip_transformations as CLIPTransformations
+from helpers.clip_transformations import evaluate
 
-from helpers.waterbirds import Waterbirds, WaterbirdsEditing
+from omegaconf import OmegaConf
+import omegaconf
 
-parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--dataset', default="WaterbirdsTiny", help='dataset')
-parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
-parser.add_argument('--arch', default='resnet50', help='model')
-parser.add_argument('--pattern-file', default='./data/waterbirds/forest_broadleaf.jpg', help='pattern file for waterbirds')
-parser.add_argument('--proj', '-p', default='CLIPAdvice', type=str, help='project name')
-parser.add_argument('--wandb-silent', action='store_true', help='turn off wandb logging')
-parser.add_argument('--nsteps', type=int, help='num steps for training')
-parser.add_argument('--binary', action='store_true')
-parser.add_argument('--advice-method', default='Noop', help='technique to apply to clip embeddings')
-parser.add_argument('--seed', default=0, type=int, help="random seed")
-args = parser.parse_args()
+parser = argparse.ArgumentParser(description='CLIP Advice')
+parser.add_argument('--config', default='configs/Noop.yaml', help="config file")
+parser.add_argument('overrides', nargs='*', help="Any key=value arguments to override config values "
+                                                "(use dots for.nested=overrides)")
+flags = parser.parse_args()
 
-if args.wandb_silent:
+overrides = OmegaConf.from_cli(flags.overrides)
+cfg       = OmegaConf.load(flags.config)
+base      = OmegaConf.load('configs/Noop.yaml')
+args      = OmegaConf.merge(base, cfg, overrides)
+args.yaml = flags.config
+
+if args.EXP.WANDB_SILENT:
     os.environ['WANDB_SILENT']="true"
 
-run = wandb.init(project=args.proj, group=args.dataset, config=args)
+def flatten_config(dic, running_key=None, flattened_dict={}):
+    for key, value in dic.items():
+        if running_key is None:
+            running_key_temp = key
+        else:
+            running_key_temp = '{}.{}'.format(running_key, key)
+        if isinstance(value, omegaconf.dictconfig.DictConfig):
+            flatten_config(value, running_key_temp)
+        else:
+            #print(running_key_temp, value)
+            flattened_dict[running_key_temp] = value
+    return flattened_dict
 
-DATASET_NAME = args.dataset
+run = wandb.init(project=args.EXP.PROJ, group=args.DATA.DATASET, config=flatten_config(args))
+wandb.save(flags.config)
+wandb.run.log_code(".")
+
+DATASET_NAME = args.DATA.DATASET
 
 # load data
-base_dataset, train_loader, val_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
-                                                        batch_size=1, workers=8)
+if args.DATA.LOAD_FROM:
+    data = torch.load(args.DATA.LOAD_FROM)
+    train_features, train_labels = data['train_features'], data['train_labels']
+    val_features, val_labels = data['val_features'], data['val_labels']
+    test_features, test_labels = data['test_features'], data['test_labels']
+else:
+    base_dataset, train_loader, val_loader, test_loader = dh.get_dataset(DATASET_NAME, '/shared/group/ilsvrc',
+                                                            batch_size=1, workers=8)
 
 # Load the model
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -70,39 +91,65 @@ def get_features(dataset):
     return torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
 
 # Calculate the image features
-text_prompts = ["an image of land", "an image of water"]
-# land_prompts = ["a photo of land", "an image of land", "a photo of a forest", "an image of a forest"]
-# water_prompts = [ "a photo of water", "an image of water", "a photo of a lake", "an image of a lake"]
-# text_prompts = [land_prompts, water_prompts]
-# text_prompts = [["an image of grass", "a photo of grass", "an image of a field", "a photo of a field"], ["an image of a road", "a photo of a road", "an image of pavement", "a photo of pavement"]]
-# text_prompts = ["an image of grass", "an image of road"]
-wandb.config.text_prompts = text_prompts
-bias_correction = getattr(CLIPTransformations, args.advice_method)(text_prompts, model)
-train_features, train_labels = get_features(train_loader)
-# apply 'advice' module
-train_features = bias_correction.apply(train_features)
-test_features, test_labels = get_features(val_loader)
-test_features = bias_correction.apply(test_features)
+prompts = list(args.EXP.TEXT_PROMPTS)
+if type(prompts[0]) == omegaconf.listconfig.ListConfig:
+    prompts = [list(p) for p in prompts]
+bias_correction = getattr(CLIPTransformations, args.EXP.ADVICE_METHOD)(prompts, model, args)
+if args.DATA.LOAD_FROM ==  None:
+    train_features, train_labels = get_features(train_loader)
+    val_features, val_labels = get_features(val_loader)
+    test_features, test_labels = get_features(test_loader)
+    data = {
+        "train_features": train_features,
+        "train_labels": train_labels,
+        "val_features": val_features,
+        "val_labels": val_labels,
+        "test_features": test_features,
+        "test_labels": test_labels
+    }
+    torch.save(data, "data/waterbirds/clip_embeddings.pth")
+if args.EXP.ADVICE_METHOD == "MLPDebias":
+    # train MLP with domain adaptation loss
+    bias_correction.train_debias(train_features, train_labels, val_features, val_labels)
+    predictions = bias_correction.eval(test_features)
+    print(predictions.shape)
+    accuracy, balanced_acc, class_accuracy = evaluate(predictions, test_labels)
+    wandb.summary["test acc"] = accuracy
+    wandb.summary["test blanced acc"] = balanced_acc
+    wandb.summary["test class acc"] = class_accuracy
+else:
+    # apply 'advice' module
+    train_features = bias_correction.apply(train_features)
+    val_features = bias_correction.apply(val_features)
+    test_features = bias_correction.apply(test_features)
 
-best_acc, best_c, best_class_acc = 0, 0, []
-# Perform logistic regression
-for c in [0.0001, 0.0005, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5, 2.0, 3.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]:
-    classifier = LogisticRegression(random_state=args.seed, C=c, max_iter=1000, verbose=1)
+    best_acc, best_c, best_class_acc = 0, 0, []
+    # Perform logistic regression
+    for c in [0.0001, 0.0005, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5, 2.0, 3.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]:
+        classifier = LogisticRegression(random_state=args.EXP.SEED, C=c, max_iter=1000, verbose=1)
+        classifier.fit(train_features, train_labels)
+
+        # Evaluate using the logistic regression classifier
+        predictions = classifier.predict(val_features)
+        accuracy, balanced_acc, class_accuracy = evaluate(predictions, val_labels)
+        
+        # print(f"C = {c} \t Accuracy = {accuracy:.3f}")
+        wandb.summary[f"C = {c} Acc"] = accuracy
+        wandb.summary[f"C = {c} Balanced Class Acc"] = balanced_acc
+        wandb.summary[f"C = {c} Class Acc"] = [round(c, 2) for c in class_accuracy]
+        if balanced_acc > best_acc:
+            best_acc, best_c, best_class_acc = balanced_acc, c, [round(c, 2) for c in class_accuracy]
+    wandb.summary['best acc'] = best_acc
+    wandb.summary['best c'] = best_c
+    wandb.summary['best class acc'] = best_class_acc
+
+    # run on test set
+    classifier = LogisticRegression(random_state=args.EXP.SEED, C=best_c, max_iter=1000, verbose=1)
     classifier.fit(train_features, train_labels)
 
     # Evaluate using the logistic regression classifier
     predictions = classifier.predict(test_features)
-    cf_matrix = confusion_matrix(test_labels, predictions)
-    class_accuracy=100*cf_matrix.diagonal()/cf_matrix.sum(1)
-    # print("Class accuracy ", class_accuracy)
-    accuracy = np.mean((test_labels == predictions).astype(np.float)) * 100.
-    balanced_acc = class_accuracy.mean()
-    # print(f"C = {c} \t Accuracy = {accuracy:.3f}")
-    wandb.summary[f"C = {c} Acc"] = accuracy
-    wandb.summary[f"C = {c} Balanced Class Acc"] = balanced_acc
-    wandb.summary[f"C = {c} Class Acc"] = [round(c, 2) for c in class_accuracy]
-    if balanced_acc > best_acc:
-        best_acc, best_c, best_class_acc = balanced_acc, c, [round(c, 2) for c in class_accuracy]
-wandb.summary['best acc'] = best_acc
-wandb.summary['best c'] = best_c
-wandb.summary['best class acc'] = best_class_acc
+    accuracy, balanced_acc, class_accuracy = evaluate(predictions, test_labels)
+    wandb.summary["test acc"] = accuracy
+    wandb.summary["test blanced acc"] = balanced_acc
+    wandb.summary["test class acc"] = class_accuracy

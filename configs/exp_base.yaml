@@ -1,0 +1,10 @@
+EXP:
+  ADVICE_METHOD: "Noop"
+  WANDB_SILENT: False
+  PROJ: "CLIPAdvice"
+  SEED: 0
+  TEXT_PROMPTS: []
+  
+
+DATA:
+  DATASET: "Waterbirds"

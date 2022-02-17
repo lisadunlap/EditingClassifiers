@@ -12,8 +12,8 @@ from collections import Counter
 from tools.custom_folder import ImageFolder
 from omegaconf import OmegaConf
 
-from helpers.waterbirds import Waterbirds, WaterbirdsBoring, WaterbirdsSimple
-from helpers.planes import Planes, PlanesOrig, PlanesGroundSeg
+from datasets.waterbirds import Waterbirds, WaterbirdsBoring, WaterbirdsSimple
+from datasets.planes import Planes, PlanesOrig, PlanesGroundSeg
 
 def tile_image(img):
     tiled = Image.new('RGB', (800,800), "black")
@@ -50,8 +50,9 @@ def get_dataset(dataset_name, dataset_path,
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
-        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        valset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(valset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     if dataset_name == 'Waterbirds95':
         args = get_config('Waterbirds95')
         transform = transforms.Compose([
@@ -60,8 +61,9 @@ def get_dataset(dataset_name, dataset_path,
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
-        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        valset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     if dataset_name == 'WaterbirdsTiny':
         args = get_config('WaterbirdsTiny')
         transform = transforms.Compose([
@@ -70,8 +72,9 @@ def get_dataset(dataset_name, dataset_path,
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         trainset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
-        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        valset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        testset = Waterbirds('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(valset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'WaterbirdsSimple':
         args = get_config('Waterbirds')
         transform = transforms.Compose([
@@ -81,7 +84,7 @@ def get_dataset(dataset_name, dataset_path,
         ])
         trainset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
         testset = WaterbirdsSimple('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'Planes':
         args = get_config('Planes')
         args.DATA.BIAS_TYPE = 'bias_A'
@@ -91,8 +94,9 @@ def get_dataset(dataset_name, dataset_path,
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         trainset = Planes('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
-        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        valset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(valset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'PlanesBalanced':
         args = get_config('Planes')
         args.DATA.BIAS_TYPE = 'balanced'
@@ -102,15 +106,16 @@ def get_dataset(dataset_name, dataset_path,
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         trainset = Planes('/shared/lisabdunlap/vl-attention/data', args, transform=transform)
-        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
-        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(testset, batch_size=batch_size)
+        valset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='val', transform=transform)
+        testset = Planes('/shared/lisabdunlap/vl-attention/data', args, split='test', transform=transform)
+        return trainset, ch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True), ch.utils.data.DataLoader(valset, batch_size=batch_size), ch.utils.data.DataLoader(testset, batch_size=batch_size)
     elif dataset_name == 'ImageNet':
         dataset = datasets.ImageNet(dataset_path)
     else:
         dataset = datasets.Places365(dataset_path)
 
     train_loader, val_loader = dataset.make_loaders(batch_size=batch_size, workers=workers)
-    return dataset, train_loader, val_loader
+    return dataset, train_loader, val_loader, None
 
 def tile_image(img):
     tiled = Image.new('RGB', (800,800), "black")

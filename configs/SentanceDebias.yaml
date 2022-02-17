@@ -1,5 +1,6 @@
 EXP:
   ADVICE_METHOD: "SentenceDebias"
+  TEXT_PROMPTS: [[ "a photo of water", "an image of water"], ["a photo of a lake", "an image of a lake"]]
   
 
 DATA:

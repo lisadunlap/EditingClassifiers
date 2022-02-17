@@ -33,7 +33,7 @@ if __name__ == '__main__':
     content_blending_ratio = args.content_blending_ratio
         
     ret = classifier_helpers.get_default_paths(args.dataset_name)
-    base_dataset, train_loader, val_loader = dh.get_dataset(args.dataset_name, 
+    base_dataset, train_loader, val_loader, test_loader = dh.get_dataset(args.dataset_name, 
                                                             ret[0],
                                                             batch_size=1, workers=8)
     style_name  = args.style_name
